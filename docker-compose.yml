@@ -1,4 +1,11 @@
-version: '3.8'
+# Local stack: gateway + Redis + a mock OpenAI-compatible provider.
+#
+#   docker compose up --build
+#   curl localhost:8000/v1/chat/completions -H "Authorization: Bearer gw-acme-local-dev-key" \
+#        -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}'
+#
+# To proxy a real provider instead of the mock:
+#   UPSTREAM_BASE_URL=https://api.openai.com/v1 UPSTREAM_API_KEY=sk-... docker compose up --build
 
 services:
   gateway:
@@ -6,11 +13,47 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - REDIS_URL=redis://redis:6379/0
+      REDIS_URL: redis://redis:6379/0
+      UPSTREAM_BASE_URL: ${UPSTREAM_BASE_URL:-http://mock-upstream:9000/v1}
+      UPSTREAM_API_KEY: ${UPSTREAM_API_KEY:-sk-mock}
+      TENANTS_FILE: /app/config/tenants.example.json
+      ADMIN_API_KEY: ${ADMIN_API_KEY:-change-me-admin-key}
+      WORKERS: ${WORKERS:-2}
+      FAIL_OPEN: "true"
+      BUDGET_PERIOD: day
+    ulimits:
+      nofile: { soft: 65536, hard: 65536 }
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
+      mock-upstream:
+        condition: service_started
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
     ports:
       - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 2s
+      retries: 10
+
+  mock-upstream:
+    build: .
+    command: ["uvicorn", "mock_upstream.server:app", "--host", "0.0.0.0", "--port", "9000",
+              "--no-access-log"]
+    environment:
+      MOCK_TOKEN_DELAY_MS: "20"
+      MOCK_COMPLETION_TOKENS: "64"
+    healthcheck:
+      disable: true
+    ports:
+      - "9000:9000"
+
+volumes:
+  redis-data:

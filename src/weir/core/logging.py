@@ -25,7 +25,7 @@ class JsonFormatter(logging.Formatter):
 def configure_logging(level: str = "INFO") -> None:
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(JsonFormatter())
-    root = logging.getLogger("gateway")
+    root = logging.getLogger("weir")
     root.handlers[:] = [handler]
     root.setLevel(level.upper())
     root.propagate = False

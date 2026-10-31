@@ -1,8 +1,8 @@
 import time
 
-from gateway.core.circuit import BreakerState, CircuitBreaker
-from gateway.services.proxy import SSEUsageTap
-from gateway.services.tokens import estimate_chat_prompt, estimate_embedding_input
+from weir.core.circuit import BreakerState, CircuitBreaker
+from weir.services.proxy import SSEUsageTap
+from weir.services.tokens import estimate_chat_prompt, estimate_embedding_input
 
 
 def test_sse_tap_handles_events_split_across_chunks():

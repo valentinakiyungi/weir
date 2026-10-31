@@ -3,9 +3,9 @@ requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "llm-gateway-proxy"
+name = "weir-gateway"
 version = "1.0.0"
-description = "Multi-tenant LLM reverse proxy with atomic Redis token governance, zero-buffer SSE streaming and fail-open circuit breaking."
+description = "Weir: a multi-tenant LLM gateway with atomic Redis token budgets, zero-buffer SSE streaming and fail-open circuit breaking."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
@@ -27,7 +27,7 @@ dev = [
 ]
 
 [project.scripts]
-llm-gateway = "gateway.main:run"
+weir = "weir.main:run"
 
 [tool.setuptools.packages.find]
 where = ["src"]

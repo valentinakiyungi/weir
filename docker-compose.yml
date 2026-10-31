@@ -1,14 +1,14 @@
-# Local stack: gateway + Redis + a mock OpenAI-compatible provider.
+# Local stack: Weir + Redis + a mock OpenAI-compatible provider.
 #
 #   docker compose up --build
-#   curl localhost:8000/v1/chat/completions -H "Authorization: Bearer gw-acme-local-dev-key" \
+#   curl localhost:8000/v1/chat/completions -H "Authorization: Bearer weir-acme-dev-key" \
 #        -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}'
 #
 # To proxy a real provider instead of the mock:
 #   UPSTREAM_BASE_URL=https://api.openai.com/v1 UPSTREAM_API_KEY=sk-... docker compose up --build
 
 services:
-  gateway:
+  weir:
     build: .
     ports:
       - "8000:8000"

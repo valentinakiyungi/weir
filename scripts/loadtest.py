@@ -7,7 +7,7 @@ token (TTFT) and total-duration percentiles. Run it against the upstream
 directly and through the gateway to get the latency the gateway adds:
 
   python scripts/loadtest.py --compare http://127.0.0.1:9200/v1 \
-      --url http://127.0.0.1:8000/v1 --key gw-loadtest-local-dev-key \
+      --url http://127.0.0.1:8000/v1 --key weir-loadtest-dev-key \
       --concurrency 2000 --rounds 2
 
 The client speaks raw HTTP/1.1 on asyncio streams (keep-alive, chunked

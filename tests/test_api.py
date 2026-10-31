@@ -25,17 +25,17 @@ async def test_health_and_ready(gw):
 
 async def test_metrics_exposed(gw):
     client, _, _ = gw
-    await client.post("/v1/chat/completions", headers=auth("gw-acme"), json=chat_body())
+    await client.post("/v1/chat/completions", headers=auth("weir-acme"), json=chat_body())
     text = (await client.get("/metrics")).text
-    assert 'gateway_requests_total{route="chat",status="200",tenant="acme"}' in text
-    assert "gateway_governance_seconds_bucket" in text
+    assert 'weir_requests_total{route="chat",status="200",tenant="acme"}' in text
+    assert "weir_governance_seconds_bucket" in text
 
 
 # ---------------------------------------------------------------- auth
 @pytest.mark.parametrize("headers,status,code", [
     ({}, 401, "missing_api_key"),
-    (auth("gw-nope"), 401, "invalid_api_key"),
-    (auth("gw-off"), 403, "tenant_disabled"),
+    (auth("weir-nope"), 401, "invalid_api_key"),
+    (auth("weir-off"), 403, "tenant_disabled"),
 ])
 async def test_auth_failures(gw, headers, status, code):
     client, transport, _ = gw
@@ -47,14 +47,14 @@ async def test_auth_failures(gw, headers, status, code):
 
 async def test_x_api_key_header_accepted(gw):
     client, _, _ = gw
-    r = await client.post("/v1/chat/completions", headers={"x-api-key": "gw-acme"},
+    r = await client.post("/v1/chat/completions", headers={"x-api-key": "weir-acme"},
                           json=chat_body())
     assert r.status_code == 200
 
 
 async def test_tenant_key_never_reaches_upstream(gw):
     client, transport, _ = gw
-    await client.post("/v1/chat/completions", headers=auth("gw-acme"), json=chat_body())
+    await client.post("/v1/chat/completions", headers=auth("weir-acme"), json=chat_body())
     sent = transport.calls[0]
     assert sent.headers["authorization"] == "Bearer sk-upstream-secret"
 
@@ -62,12 +62,12 @@ async def test_tenant_key_never_reaches_upstream(gw):
 # ---------------------------------------------------------------- proxying
 async def test_non_streaming_completion_is_billed_with_actual_usage(gw):
     client, _, _ = gw
-    r = await client.post("/v1/chat/completions", headers=auth("gw-acme"),
+    r = await client.post("/v1/chat/completions", headers=auth("weir-acme"),
                           json=chat_body(max_tokens=10))
     assert r.status_code == 200
     body = r.json()
     assert body["usage"]["completion_tokens"] == 10
-    assert r.headers["x-gateway-tenant"] == "acme"
+    assert r.headers["x-weir-tenant"] == "acme"
     assert int(r.headers["x-ratelimit-remaining-requests"]) == 999
     u = await usage(client, "acme")
     assert u["used"] == body["usage"]["total_tokens"]
@@ -77,7 +77,7 @@ async def test_non_streaming_completion_is_billed_with_actual_usage(gw):
 
 async def test_streaming_passthrough_and_usage_injection(gw):
     client, transport, _ = gw
-    async with client.stream("POST", "/v1/chat/completions", headers=auth("gw-acme"),
+    async with client.stream("POST", "/v1/chat/completions", headers=auth("weir-acme"),
                              json=chat_body(stream=True, max_tokens=5)) as r:
         assert r.status_code == 200
         assert r.headers["content-type"].startswith("text/event-stream")
@@ -95,23 +95,23 @@ async def test_streaming_passthrough_and_usage_injection(gw):
 
 async def test_max_tokens_injected_when_missing(gw):
     client, transport, app = gw
-    await client.post("/v1/chat/completions", headers=auth("gw-acme"), json=chat_body())
+    await client.post("/v1/chat/completions", headers=auth("weir-acme"), json=chat_body())
     sent = json.loads(transport.calls[0].content)
     assert sent["max_tokens"] == app.state.services.settings.default_max_tokens
 
 
 async def test_model_allow_list(gw):
     client, transport, _ = gw
-    r = await client.post("/v1/chat/completions", headers=auth("gw-restricted"),
+    r = await client.post("/v1/chat/completions", headers=auth("weir-restricted"),
                           json=chat_body(model="gpt-4o"))
     assert r.status_code == 403 and r.json()["error"]["code"] == "model_not_allowed"
-    r = await client.get("/v1/models", headers=auth("gw-restricted"))
+    r = await client.get("/v1/models", headers=auth("weir-restricted"))
     assert [m["id"] for m in r.json()["data"]] == ["gpt-4o-mini"]
 
 
 async def test_embeddings(gw):
     client, _, _ = gw
-    r = await client.post("/v1/embeddings", headers=auth("gw-acme"),
+    r = await client.post("/v1/embeddings", headers=auth("weir-acme"),
                           json={"model": "text-embedding-3-small", "input": ["a b c", "d"]})
     assert r.status_code == 200 and len(r.json()["data"]) == 2
     u = await usage(client, "acme")
@@ -124,20 +124,20 @@ async def test_embeddings(gw):
 ])
 async def test_bad_requests(gw, body, code):
     client, _, _ = gw
-    r = await client.post("/v1/chat/completions", headers=auth("gw-acme"), json=body)
+    r = await client.post("/v1/chat/completions", headers=auth("weir-acme"), json=body)
     assert r.status_code == 400 and r.json()["error"]["code"] == code
 
 
 async def test_invalid_json(gw):
     client, _, _ = gw
-    r = await client.post("/v1/chat/completions", headers=auth("gw-acme"), content=b"{nope")
+    r = await client.post("/v1/chat/completions", headers=auth("weir-acme"), content=b"{nope")
     assert r.status_code == 400
 
 
 # ---------------------------------------------------------------- upstream failures
 async def test_upstream_error_passthrough_releases_reservation(gw):
     client, _, _ = gw
-    r = await client.post("/v1/chat/completions", headers=auth("gw-acme"),
+    r = await client.post("/v1/chat/completions", headers=auth("weir-acme"),
                           json=chat_body(model="mock-error-500"))
     assert r.status_code == 500
     assert r.json()["error"]["message"] == "mock upstream failure"
@@ -149,10 +149,10 @@ async def test_upstream_unreachable_and_circuit_opens(make_client):
     client, _, _ = await make_client(use_mock=False, upstream_base_url="http://127.0.0.1:1/v1",
                                      upstream_breaker_threshold=2)
     for _ in range(2):
-        r = await client.post("/v1/chat/completions", headers=auth("gw-acme"), json=chat_body())
+        r = await client.post("/v1/chat/completions", headers=auth("weir-acme"), json=chat_body())
         assert r.status_code == 502
         assert r.json()["error"]["code"] == "upstream_unreachable"
-    r = await client.post("/v1/chat/completions", headers=auth("gw-acme"), json=chat_body())
+    r = await client.post("/v1/chat/completions", headers=auth("weir-acme"), json=chat_body())
     assert r.status_code == 503 and r.json()["error"]["code"] == "upstream_unavailable"
     assert (await usage(client, "acme"))["reserved_in_flight"] == 0
 
@@ -162,7 +162,7 @@ async def test_rpm_limit_rejects_without_calling_upstream(gw):
     client, transport, _ = gw
     codes = []
     for _ in range(5):
-        r = await client.post("/v1/chat/completions", headers=auth("gw-small"), json=chat_body())
+        r = await client.post("/v1/chat/completions", headers=auth("weir-small"), json=chat_body())
         codes.append(r.status_code)
     assert codes == [200, 200, 200, 429, 429]
     assert len(transport.calls) == 3
@@ -175,7 +175,7 @@ async def test_rpm_is_atomic_under_concurrency(gw):
     results = []
 
     async def one():
-        r = await client.post("/v1/chat/completions", headers=auth("gw-small"), json=chat_body())
+        r = await client.post("/v1/chat/completions", headers=auth("weir-small"), json=chat_body())
         results.append(r.status_code)
 
     async with anyio.create_task_group() as tg:
@@ -217,7 +217,7 @@ async def test_budget_clamps_max_tokens_to_remaining(gw):
     h = await _budget_tenant(client, budget=40)
     r = await client.post("/v1/chat/completions", headers=h, json=chat_body(max_tokens=500))
     assert r.status_code == 200
-    granted = int(r.headers["x-gateway-max-tokens"])
+    granted = int(r.headers["x-weir-max-tokens"])
     assert granted < 40
     assert json.loads(transport.calls[0].content)["max_tokens"] == granted
     assert r.json()["usage"]["completion_tokens"] <= granted
@@ -265,7 +265,7 @@ async def test_admin_lifecycle(gw):
     r = await client.post("/admin/tenants", headers=a, json={"id": "newco", "rpm": 10})
     assert r.status_code == 201
     key, key_id = r.json()["api_key"], r.json()["key_id"]
-    assert key.startswith("gw-")
+    assert key.startswith("weir-")
     assert (await client.post("/admin/tenants", headers=a, json={"id": "newco"})).status_code == 409
     assert (await client.post("/v1/chat/completions", headers=auth(key),
                               json=chat_body())).status_code == 200
@@ -307,24 +307,24 @@ async def test_fail_open_when_redis_down(make_client, redis_url):
     client, transport, app = await make_client(
         redis_url="redis://127.0.0.1:1/0", redis_breaker_threshold=2)
     # seed tenant still authenticates from the seed file; request still served
-    r = await client.post("/v1/chat/completions", headers=auth("gw-acme"), json=chat_body())
+    r = await client.post("/v1/chat/completions", headers=auth("weir-acme"), json=chat_body())
     assert r.status_code == 200
-    assert r.headers["x-gateway-degraded"] == "1"
+    assert r.headers["x-weir-degraded"] == "1"
     assert app.state.services.redis.breaker.state.name == "OPEN"
     ready = await client.get("/ready")
     assert ready.status_code == 200 and ready.json()["status"] == "degraded"
     # ...but not unbounded: the local per-process RPM guard still applies
-    codes = [(await client.post("/v1/chat/completions", headers=auth("gw-small"),
+    codes = [(await client.post("/v1/chat/completions", headers=auth("weir-small"),
                                 json=chat_body())).status_code for _ in range(5)]
     assert codes == [200, 200, 200, 429, 429]
     # unknown keys are still rejected
-    r = await client.post("/v1/chat/completions", headers=auth("gw-unknown"), json=chat_body())
+    r = await client.post("/v1/chat/completions", headers=auth("weir-unknown"), json=chat_body())
     assert r.status_code == 503
 
 
 async def test_fail_closed_when_configured(make_client):
     client, transport, _ = await make_client(redis_url="redis://127.0.0.1:1/0", fail_open=False)
-    r = await client.post("/v1/chat/completions", headers=auth("gw-acme"), json=chat_body())
+    r = await client.post("/v1/chat/completions", headers=auth("weir-acme"), json=chat_body())
     assert r.status_code == 503
     assert r.json()["error"]["code"] == "governance_unavailable"
     assert transport.calls == []
@@ -334,10 +334,10 @@ async def test_recovers_after_redis_returns(make_client, redis_url):
     client, _, app = await make_client(redis_breaker_threshold=1,
                                        redis_breaker_recovery_seconds=0.05)
     app.state.services.redis.breaker.force_open()
-    r = await client.post("/v1/chat/completions", headers=auth("gw-acme"), json=chat_body())
-    assert r.headers.get("x-gateway-degraded") == "1"
+    r = await client.post("/v1/chat/completions", headers=auth("weir-acme"), json=chat_body())
+    assert r.headers.get("x-weir-degraded") == "1"
     await anyio.sleep(0.06)
-    r = await client.post("/v1/chat/completions", headers=auth("gw-acme"), json=chat_body())
-    assert "x-gateway-degraded" not in r.headers
+    r = await client.post("/v1/chat/completions", headers=auth("weir-acme"), json=chat_body())
+    assert "x-weir-degraded" not in r.headers
     assert app.state.services.redis.breaker.state.name == "CLOSED"
-    assert redis.Redis.from_url(redis_url).exists("gw:rl:{acme}:rpm")
+    assert redis.Redis.from_url(redis_url).exists("weir:rl:{acme}:rpm")

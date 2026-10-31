@@ -5,9 +5,9 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
-from gateway.api.deps import require_admin, services
-from gateway.api.errors import GatewayError
-from gateway.services.tenants import Tenant, TenantPolicy
+from weir.api.deps import require_admin, services
+from weir.api.errors import GatewayError
+from weir.services.tenants import Tenant, TenantPolicy
 
 router = APIRouter(prefix="/admin", dependencies=[Depends(require_admin)], tags=["admin"])
 

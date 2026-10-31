@@ -11,7 +11,7 @@ import pytest
 import uvicorn
 
 import mock_upstream.server as mock_server
-from gateway.services.transport import FastTransport
+from weir.services.transport import FastTransport
 
 pytestmark = pytest.mark.anyio
 

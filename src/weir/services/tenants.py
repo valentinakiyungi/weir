@@ -17,11 +17,11 @@ import time
 import anyio
 from pydantic import BaseModel, Field
 
-from gateway.core.config import Settings
-from gateway.core.logging import log_event
-from gateway.core.redis import RedisGuard, RedisUnavailable
+from weir.core.config import Settings
+from weir.core.logging import log_event
+from weir.core.redis import RedisGuard, RedisUnavailable
 
-log = logging.getLogger("gateway.tenants")
+log = logging.getLogger("weir.tenants")
 
 TENANT_ID_PATTERN = r"^[a-z0-9][a-z0-9_-]{0,62}$"
 
@@ -59,7 +59,7 @@ def hash_key(api_key: str) -> str:
 
 
 def generate_key() -> str:
-    return "gw-" + secrets.token_urlsafe(32)
+    return "weir-" + secrets.token_urlsafe(32)
 
 
 class TenantRegistry:

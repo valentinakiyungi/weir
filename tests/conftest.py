@@ -20,8 +20,8 @@ import pytest
 import redis
 
 import mock_upstream.server as mock_server
-from gateway.core.config import Settings
-from gateway.main import create_app
+from weir.core.config import Settings
+from weir.main import create_app
 
 
 def _free_port() -> int:
@@ -84,12 +84,12 @@ class CountingTransport(httpx.ASGITransport):
 SEED = {
     "tenants": [
         {"id": "acme", "name": "Acme", "rpm": 1000, "tpm": 1_000_000, "token_budget": 10_000_000,
-         "api_keys": ["gw-acme"]},
+         "api_keys": ["weir-acme"]},
         {"id": "small", "name": "Small", "rpm": 3, "tpm": 1_000_000, "token_budget": 10_000_000,
-         "api_keys": ["gw-small"]},
+         "api_keys": ["weir-small"]},
         {"id": "restricted", "rpm": 100, "tpm": 100_000, "token_budget": 100_000,
-         "allowed_models": ["gpt-4o-mini"], "api_keys": ["gw-restricted"]},
-        {"id": "off", "enabled": False, "api_keys": ["gw-off"]},
+         "allowed_models": ["gpt-4o-mini"], "api_keys": ["weir-restricted"]},
+        {"id": "off", "enabled": False, "api_keys": ["weir-off"]},
     ]
 }
 

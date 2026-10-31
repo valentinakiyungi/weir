@@ -6,13 +6,13 @@ from dataclasses import dataclass
 
 from fastapi import Request
 
-from gateway.api.errors import GatewayError
-from gateway.core.config import Settings
-from gateway.core.redis import RedisGuard
-from gateway.services.limiter import Governor
-from gateway.services.metrics import Metrics
-from gateway.services.proxy import UpstreamProxy
-from gateway.services.tenants import Tenant, TenantRegistry
+from weir.api.errors import GatewayError
+from weir.core.config import Settings
+from weir.core.redis import RedisGuard
+from weir.services.limiter import Governor
+from weir.services.metrics import Metrics
+from weir.services.proxy import UpstreamProxy
+from weir.services.tenants import Tenant, TenantRegistry
 
 
 @dataclass

@@ -12,7 +12,7 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PORT=8000 \
     WORKERS=2
-RUN useradd --system --uid 10001 --no-create-home gateway
+RUN useradd --system --uid 10001 --no-create-home weir
 COPY --from=build /wheels /wheels
 RUN pip install --no-cache-dir /wheels/*.whl && rm -rf /wheels
 WORKDIR /app
@@ -20,8 +20,8 @@ WORKDIR /app
 COPY mock_upstream ./mock_upstream
 COPY scripts ./scripts
 COPY config ./config
-USER gateway
+USER weir
 EXPOSE 8000
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
   CMD python -c "import urllib.request,os; urllib.request.urlopen(f'http://127.0.0.1:{os.environ[\"PORT\"]}/health', timeout=2)"
-CMD ["sh", "-c", "exec uvicorn gateway.main:app --host 0.0.0.0 --port ${PORT} --workers ${WORKERS} --no-access-log --backlog 4096 --timeout-keep-alive 75"]
+CMD ["sh", "-c", "exec uvicorn weir.main:app --host 0.0.0.0 --port ${PORT} --workers ${WORKERS} --no-access-log --backlog 4096 --timeout-keep-alive 75"]

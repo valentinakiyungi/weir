@@ -7,13 +7,13 @@ from typing import TypeVar
 import redis.asyncio as aioredis
 from redis.exceptions import RedisError
 
-from gateway.core.circuit import CircuitBreaker
-from gateway.core.config import Settings
-from gateway.core.logging import log_event
-from gateway.services.metrics import Metrics
+from weir.core.circuit import CircuitBreaker
+from weir.core.config import Settings
+from weir.core.logging import log_event
+from weir.services.metrics import Metrics
 
 T = TypeVar("T")
-log = logging.getLogger("gateway.redis")
+log = logging.getLogger("weir.redis")
 
 
 class RedisUnavailable(Exception):

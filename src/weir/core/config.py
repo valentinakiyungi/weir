@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     redis_max_connections: int = 256
     redis_breaker_threshold: int = 5
     redis_breaker_recovery_seconds: float = 5.0
-    key_prefix: str = "gw"
+    key_prefix: str = "weir"
 
     # When Redis is unreachable: True = keep serving (fail-open, with a local
     # per-process RPM guard), False = reject with 503 (fail-closed).

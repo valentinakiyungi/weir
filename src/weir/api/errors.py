@@ -4,8 +4,8 @@ from fastapi import Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from gateway.core.redis import RedisUnavailable
-from gateway.services.limiter import GovernanceUnavailable
+from weir.core.redis import RedisUnavailable
+from weir.services.limiter import GovernanceUnavailable
 
 
 class GatewayError(Exception):

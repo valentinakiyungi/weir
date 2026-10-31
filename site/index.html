@@ -1,0 +1,991 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Weir</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="Weir is a multi-tenant LLM gateway: per-team keys, rate limits and token budgets that hold under bursts, with zero-buffer streaming.">
+<meta property="og:title" content="Weir">
+<meta property="og:description" content="Let tokens through. Hold the budget. A multi-tenant LLM gateway with atomic Redis token budgets and zero-buffer SSE streaming.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230E3440'/%3E%3Crect x='7' y='9' width='18' height='9' rx='1.5' fill='%23D9DED9'/%3E%3Cpath d='M4 21c3 0 3 2 6 2s3-2 6-2 3 2 6 2 3-2 6-2' stroke='%234CC2B4' stroke-width='2.4' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,300..900&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one left-aligned column; the live weir simulator is the hero; quiet sections below, measured like a river gauge. */
+:root {
+  --bg: #E3E8E5;          /* wet concrete */
+  --surface: #F2F5F2;     /* dry slab */
+  --ink: #17262A;
+  --muted: #4B5D60;
+  --line: #C3CCC9;
+  --deep: #0E3440;        /* the river: simulator panel */
+  --deep-2: #164755;
+  --on-deep: #E4EEEC;
+  --on-deep-muted: #9DB9B8;
+  --flow: #1C7A73;        /* admitted water, text-safe on light */
+  --flow-bright: #4CC2B4; /* admitted water on the river */
+  --clamp: #9A6512;
+  --clamp-bright: #E9B44C;
+  --stop: #B5342A;        /* staff-gauge red: limits and overruns */
+  --stop-bright: #F2735F;
+  --crest: #D9DED9;
+  --btn-bg: #0E3440;
+  --btn-fg: #F2F5F2;
+  --code-bg: #10292F;
+  --code-fg: #D6E6E3;
+
+  --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --body: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+
+  --step--1: 0.875rem;
+  --step-0: 1.0625rem;
+  --step-1: 1.3125rem;
+  --step-2: 1.75rem;
+  --step-3: clamp(2rem, 4vw, 2.75rem);
+  --step-4: clamp(2.6rem, 7.2vw, 5.4rem);
+  --measure: 64ch;
+  --wrap: 1180px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0F1C1F; --surface: #15262A; --ink: #DCE6E3; --muted: #9AAEAD; --line: #2A3E42;
+    --deep: #0A2830; --deep-2: #113A45; --on-deep: #E4EEEC; --on-deep-muted: #8FB0AE;
+    --flow: #5CC8BA; --flow-bright: #4CC2B4; --clamp: #E2B04F; --clamp-bright: #E9B44C;
+    --stop: #F07C6A; --stop-bright: #F2735F; --crest: #C9D2CE;
+    --btn-bg: #5CC8BA; --btn-fg: #0A2228; --code-bg: #0A2026; --code-fg: #D6E6E3;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0F1C1F; --surface: #15262A; --ink: #DCE6E3; --muted: #9AAEAD; --line: #2A3E42;
+  --deep: #0A2830; --deep-2: #113A45; --on-deep: #E4EEEC; --on-deep-muted: #8FB0AE;
+  --flow: #5CC8BA; --flow-bright: #4CC2B4; --clamp: #E2B04F; --clamp-bright: #E9B44C;
+  --stop: #F07C6A; --stop-bright: #F2735F; --crest: #C9D2CE;
+  --btn-bg: #5CC8BA; --btn-fg: #0A2228; --code-bg: #0A2026; --code-fg: #D6E6E3;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--body);
+  font-size: var(--step-0);
+  line-height: 1.55;
+  font-variation-settings: "wdth" 100;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: inherit; }
+:focus-visible { outline: 3px solid var(--flow); outline-offset: 3px; border-radius: 4px; }
+.wrap {
+  max-width: var(--wrap);
+  margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; }
+p { margin: 0; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* ---------- top bar ---------- */
+.top { padding-block: 22px; }
+.top .wrap { display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
+.mark {
+  position: relative; display: inline-block; text-decoration: none;
+  font-family: var(--display); font-weight: 850; font-size: 1.6rem; letter-spacing: -0.01em;
+  font-variation-settings: "wdth" 125; line-height: 1;
+}
+.mark::after {
+  content: ""; position: absolute; left: -3px; right: -3px; top: 62%; height: 3px;
+  background: var(--flow); border-radius: 2px;
+}
+.top nav { display: flex; gap: 22px; flex-wrap: wrap; font-size: var(--step--1); }
+.top nav a { text-decoration: none; color: var(--muted); }
+.top nav a:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 4px; }
+
+/* ---------- hero ---------- */
+.hero { padding-block: 28px 30px; }
+.hero h1 {
+  font-size: var(--step-4); line-height: 0.98; letter-spacing: -0.025em; font-weight: 850;
+  font-variation-settings: "wdth" 125; max-width: 15ch;
+}
+.hero h1 .line {
+  display: inline;
+  /* each line sits 40% under water: the gradient is twice the line height and
+     splits at 30%, so the visible split lands at 60% of the line */
+  background-image: linear-gradient(to bottom, var(--ink) 0 30%, var(--flow) 30% 100%);
+  background-size: 100% 200%;
+  background-position: 0 0;
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  -webkit-box-decoration-break: clone; box-decoration-break: clone;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .hero h1 .line { animation: rise 1.4s cubic-bezier(.2,.7,.2,1) both; }
+  .hero h1 .line + br + .line { animation-delay: .18s; }
+  @keyframes rise { from { background-position: 0 -40%; } }
+}
+.lede { margin-top: 22px; max-width: 58ch; font-size: var(--step-1); line-height: 1.45; color: var(--muted); }
+.actions { margin-top: 26px; display: flex; gap: 12px; flex-wrap: wrap; }
+.btn {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 46px; padding: 0 20px;
+  border-radius: 999px; font: 600 var(--step-0)/1 var(--body); text-decoration: none; cursor: pointer;
+  border: 2px solid var(--btn-bg); background: var(--btn-bg); color: var(--btn-fg);
+}
+.btn.ghost { background: transparent; color: var(--ink); border-color: var(--line); }
+.btn.ghost:hover { border-color: var(--ink); }
+.btn svg { width: 18px; height: 18px; }
+
+/* ---------- simulator ---------- */
+.sim {
+  margin-top: 36px; background: var(--deep); color: var(--on-deep);
+  border-radius: 22px; overflow: hidden;
+}
+.sim-head {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 12px 24px; flex-wrap: wrap;
+  padding: 20px 24px 6px;
+}
+.sim-head h2 { font-size: var(--step-1); font-variation-settings: "wdth" 112; font-weight: 700; }
+.sim-head p { color: var(--on-deep-muted); font-size: var(--step--1); max-width: 62ch; }
+.sim-body { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 0; }
+.river { position: relative; min-width: 0; }
+.river canvas { display: block; width: 100%; height: 360px; }
+.status-pill {
+  position: absolute; bottom: 10px; right: 12px; padding: 5px 12px; border-radius: 999px;
+  font-size: 0.8rem; font-weight: 600; background: var(--deep-2); color: var(--on-deep-muted);
+}
+.status-pill[data-state="down"] { background: var(--stop-bright); color: #2A0D09; }
+.gauges {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px;
+  padding: 16px 22px 18px; border-left: 1px solid var(--deep-2);
+}
+.gauge { display: grid; grid-template-rows: auto 210px auto; gap: 8px; min-width: 0; }
+.gauge h3 { font-size: 0.95rem; font-weight: 700; font-variation-settings: "wdth" 100; }
+.staff {
+  position: relative; border-radius: 6px; background: var(--deep-2); overflow: hidden;
+}
+.staff::before { /* staff-gauge E marks: every 10% of budget, scale runs to 150% */
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 9px; z-index: 3;
+  background: repeating-linear-gradient(to top, var(--crest) 0 2px, transparent 2px calc(100% / 15));
+  opacity: .55;
+}
+.fill { position: absolute; left: 0; right: 0; bottom: 0; transition: height .25s linear; }
+.fill.used { background: var(--flow-bright); z-index: 1; }
+.fill.reserved {
+  z-index: 1;
+  background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--flow-bright) 55%, transparent) 0 5px, transparent 5px 10px);
+}
+.fill.over { background: var(--stop-bright); z-index: 2; }
+.crestline {
+  position: absolute; left: 0; right: 0; bottom: calc(100% / 1.5); height: 0; z-index: 4;
+  border-top: 2px dashed var(--crest);
+}
+.crestline span {
+  position: absolute; right: 4px; bottom: 3px; font-size: 0.68rem; color: var(--on-deep-muted);
+  letter-spacing: 0.02em;
+}
+.paused-note {
+  position: absolute; inset: auto 6px 8px 14px; z-index: 5; font-size: 0.7rem; line-height: 1.25;
+  background: var(--deep); color: var(--on-deep); padding: 5px 6px; border-radius: 4px;
+}
+.readout { font-size: 0.78rem; line-height: 1.45; color: var(--on-deep-muted); font-variant-numeric: tabular-nums; }
+.readout b { color: var(--on-deep); font-weight: 600; }
+.readout .over-text { color: var(--stop-bright); font-weight: 600; }
+.sim-controls {
+  display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+  padding: 14px 22px; border-top: 1px solid var(--deep-2);
+}
+.sim-controls button {
+  min-height: 40px; padding: 0 16px; border-radius: 999px; cursor: pointer;
+  font: 600 0.9rem/1 var(--body); color: var(--on-deep); background: transparent;
+  border: 1.5px solid color-mix(in srgb, var(--on-deep) 35%, transparent);
+}
+.sim-controls button:hover { border-color: var(--on-deep); }
+.sim-controls button[aria-pressed="true"] { background: var(--stop-bright); border-color: var(--stop-bright); color: #2A0D09; }
+.sim-controls button.primary { background: var(--flow-bright); border-color: var(--flow-bright); color: #062421; }
+.seg { display: inline-flex; border-radius: 999px; padding: 3px; background: var(--deep-2); gap: 2px; }
+.seg label { position: relative; }
+.seg input { position: absolute; opacity: 0; inset: 0; cursor: pointer; }
+.seg span { display: block; padding: 9px 14px; border-radius: 999px; font-size: 0.85rem; font-weight: 600; color: var(--on-deep-muted); }
+.seg input:checked + span { background: var(--on-deep); color: var(--deep); }
+.seg input:focus-visible + span { outline: 3px solid var(--flow-bright); outline-offset: 1px; }
+.spacer { flex: 1; }
+.log {
+  list-style: none; margin: 0; padding: 12px 22px 18px; display: grid; gap: 3px;
+  font-size: 0.82rem; color: var(--on-deep-muted); min-height: 98px; border-top: 1px solid var(--deep-2);
+}
+.log li::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 9px; background: var(--flow-bright); vertical-align: 1px; }
+.log li[data-kind="clamp"]::before { background: var(--clamp-bright); }
+.log li[data-kind="stop"]::before { background: var(--stop-bright); }
+.log li[data-kind="info"]::before { background: var(--crest); }
+.legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 0.78rem; color: var(--on-deep-muted); padding: 0 24px 10px; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+
+/* ---------- sections ---------- */
+section.block { padding-block: 84px 0; }
+.block h2 { font-size: var(--step-3); font-weight: 800; letter-spacing: -0.02em; font-variation-settings: "wdth" 118; line-height: 1.05; }
+.block .intro { margin-top: 14px; max-width: var(--measure); color: var(--muted); }
+
+.steps {
+  list-style: none; padding: 0; margin: 40px 0 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0; position: relative; counter-reset: step;
+}
+.steps::before { content: ""; position: absolute; left: 0; right: 0; top: 17px; height: 3px; background: var(--flow); border-radius: 2px; opacity: .8; }
+.steps li { position: relative; padding: 0 22px 0 0; counter-increment: step; min-width: 0; }
+.steps li::before {
+  content: counter(step); display: grid; place-items: center; width: 37px; height: 37px; border-radius: 50%;
+  background: var(--bg); border: 3px solid var(--flow); color: var(--flow); font-weight: 800; position: relative;
+}
+.steps h3 { margin-top: 16px; font-size: var(--step-1); font-variation-settings: "wdth" 110; font-weight: 700; }
+.steps p { margin-top: 8px; color: var(--muted); font-size: 0.98rem; }
+.steps code, .fails code, .intro code { font-family: var(--mono); font-size: 0.86em; background: var(--surface); padding: 1px 5px; border-radius: 4px; }
+
+.fails { margin: 36px 0 0; display: grid; grid-template-columns: minmax(0, 15rem) minmax(0, 1fr); border-top: 2px solid var(--ink); }
+.fails dt, .fails dd { margin: 0; padding: 18px 0; border-bottom: 1px solid var(--line); }
+.fails dt { font-weight: 700; padding-right: 24px; }
+.fails dd { color: var(--muted); max-width: 70ch; }
+
+.numbers { margin-top: 40px; display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 56px 64px; }
+.fig h3 { font-size: var(--step-1); font-weight: 700; font-variation-settings: "wdth" 108; }
+.fig .cap { margin-top: 6px; font-size: 0.92rem; color: var(--muted); max-width: 56ch; }
+.fig-head { display: flex; justify-content: space-between; align-items: end; gap: 16px; flex-wrap: wrap; }
+.seg.light { background: var(--surface); }
+.seg.light span { color: var(--muted); }
+.seg.light input:checked + span { background: var(--ink); color: var(--bg); }
+.bars { margin-top: 22px; display: grid; gap: 16px; position: relative; }
+.bar-row { display: grid; grid-template-columns: 11rem minmax(0, 1fr); gap: 14px; align-items: center; }
+.bar-row .name { font-size: 0.92rem; font-weight: 600; }
+.track { position: relative; height: 34px; }
+.bar {
+  height: 100%; border-radius: 4px; background: var(--muted); display: flex; align-items: center;
+  justify-content: flex-end; padding: 0 10px; color: var(--bg); font-weight: 700; font-size: 0.85rem;
+  font-variant-numeric: tabular-nums; min-width: 4.5rem; transition: width .5s cubic-bezier(.2,.7,.2,1);
+  white-space: nowrap;
+}
+.bar.ok { background: var(--flow); }
+.bar.bad { background: var(--stop); }
+.bar.mid { background: var(--muted); }
+.crest-mark { position: absolute; top: -8px; bottom: -8px; border-left: 2px dashed var(--ink); z-index: 2; pointer-events: none; }
+.crest-mark span { position: absolute; top: -18px; left: -2px; font-size: 0.74rem; color: var(--ink); white-space: nowrap; transform: translateX(-50%); }
+.bars.budget { margin-top: 38px; }
+.lat { margin-top: 22px; width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.lat th, .lat td { text-align: left; padding: 12px 10px 12px 0; border-bottom: 1px solid var(--line); }
+.lat th { font-size: 0.85rem; color: var(--muted); font-weight: 600; }
+.lat td:first-child { font-weight: 600; }
+.lat .big { font-size: var(--step-1); font-weight: 800; font-variation-settings: "wdth" 112; }
+.env { margin-top: 28px; padding-top: 18px; border-top: 1px solid var(--line); font-size: 0.9rem; color: var(--muted); max-width: 80ch; grid-column: 1 / -1; }
+
+.run { margin-top: 36px; }
+.tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.tabs button {
+  min-height: 40px; padding: 0 16px; border-radius: 999px; border: 1.5px solid var(--line); background: transparent;
+  color: var(--muted); font: 600 0.92rem/1 var(--body); cursor: pointer;
+}
+.tabs button[aria-selected="true"] { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+.code {
+  position: relative; margin-top: 14px; background: var(--code-bg); color: var(--code-fg); border-radius: 14px;
+}
+.code pre { margin: 0; padding: 22px 24px; overflow-x: auto; font: 0.88rem/1.65 var(--mono); }
+.code .c { color: #7FA3A0; }
+.code .k { color: #E9B44C; }
+.code .s { color: #8ED9CC; }
+.copy {
+  position: absolute; top: 12px; right: 12px; min-height: 34px; padding: 0 14px; border-radius: 999px; cursor: pointer;
+  background: transparent; color: var(--code-fg); border: 1.5px solid color-mix(in srgb, var(--code-fg) 35%, transparent);
+  font: 600 0.8rem/1 var(--body);
+}
+.run .note { margin-top: 14px; font-size: 0.92rem; color: var(--muted); max-width: var(--measure); }
+
+footer { margin-top: 100px; border-top: 1px solid var(--line); padding-block: 28px 40px; color: var(--muted); font-size: 0.9rem; }
+footer .wrap { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+
+/* ---------- responsive ---------- */
+@media (max-width: 980px) {
+  .sim-body { grid-template-columns: minmax(0, 1fr); }
+  .gauges { border-left: 0; border-top: 1px solid var(--deep-2); }
+  .numbers { grid-template-columns: minmax(0, 1fr); }
+  .steps { grid-template-columns: minmax(0, 1fr); gap: 26px; }
+  .steps::before { left: 17px; right: auto; top: 0; bottom: 0; width: 3px; height: auto; }
+  .steps li { display: grid; grid-template-columns: 37px minmax(0, 1fr); column-gap: 16px; padding: 0; }
+  .steps li::before { grid-row: 1 / span 2; }
+  .steps h3 { margin-top: 4px; }
+}
+@media (max-width: 620px) {
+  .river canvas { height: 300px; }
+  .sim-head { padding: 18px 16px 6px; }
+  .legend { padding: 0 16px 10px; }
+  .gauges { padding: 14px 16px; gap: 10px; }
+  .gauge { grid-template-rows: auto 170px auto; }
+  .sim-controls, .log { padding-left: 16px; padding-right: 16px; }
+  .fails { grid-template-columns: minmax(0, 1fr); }
+  .fails dt { padding-bottom: 4px; border-bottom: 0; }
+  .fails dd { padding-top: 0; }
+  .bar-row { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .sim { border-radius: 16px; }
+  .lat .big { font-size: 1.05rem; }
+  .lat th, .lat td { padding-right: 6px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fill, .bar { transition: none; }
+}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <a class="mark" href="#" aria-label="Weir home">Weir</a>
+    <nav aria-label="Sections">
+      <a href="#how">How it works</a>
+      <a href="#failures">Failure modes</a>
+      <a href="#numbers">Benchmarks</a>
+      <a href="#run">Quickstart</a>
+      <a href="https://github.com/valentinakiyungi/weir">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="wrap hero">
+    <h1><span class="line">Let tokens through.</span><br><span class="line">Hold the budget.</span></h1>
+    <p class="lede">Weir is an OpenAI-compatible gateway for teams that share LLM spend. Every team gets its own key, rate limits and a token budget that holds even when a thousand requests land at once. Streams pass through untouched.</p>
+    <div class="actions">
+      <a class="btn" href="https://github.com/valentinakiyungi/weir">
+        <svg viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        View the source
+      </a>
+      <a class="btn ghost" href="#run">Run it locally</a>
+    </div>
+
+    <section class="sim" aria-labelledby="sim-title">
+      <div class="sim-head">
+        <h2 id="sim-title">Three teams, one provider key</h2>
+        <p>A running model of the gateway in your browser. Requests flow in from the left and cross the weir only if the team's limits allow. The gauges show each team's daily token budget.</p>
+      </div>
+      <div class="legend" aria-hidden="true">
+        <span><i style="background:var(--flow-bright)"></i>Served</span>
+        <span><i style="background:var(--clamp-bright)"></i>Served with max_tokens lowered</span>
+        <span><i style="background:var(--stop-bright)"></i>Refused</span>
+      </div>
+      <div class="sim-body">
+        <div class="river">
+          <canvas id="river" aria-label="Animated view of requests flowing through the gateway to the provider" role="img"></canvas>
+          <span class="status-pill" id="redis-pill" data-state="up">Redis online</span>
+        </div>
+        <div class="gauges" id="gauges"></div>
+      </div>
+      <div class="sim-controls">
+        <button type="button" class="primary" id="burst">Send a burst</button>
+        <button type="button" id="redis" aria-pressed="false">Take Redis offline</button>
+        <div class="seg" role="radiogroup" aria-label="Budget check">
+          <label><input type="radio" name="mode" id="mode-weir" value="weir" checked><span>Reserve first (Weir)</span></label>
+          <label><input type="radio" name="mode" id="mode-naive" value="naive"><span>Check, then charge</span></label>
+        </div>
+        <span class="spacer"></span>
+        <button type="button" id="newday">Start a new day</button>
+        <button type="button" id="pause" aria-pressed="false">Pause</button>
+      </div>
+      <ul class="log" id="log" aria-label="Recent gateway decisions"></ul>
+      <p class="sr-only" aria-live="polite" id="announce"></p>
+    </section>
+  </div>
+
+  <section class="block" id="how" aria-labelledby="how-title">
+    <div class="wrap">
+      <h2 id="how-title">One request, five steps</h2>
+      <p class="intro">Each request costs the gateway two Redis round trips, both single Lua scripts, so any number of gateway instances agree on every limit without locks.</p>
+      <ol class="steps">
+        <li><h3>Authenticate</h3><p>The team's key is hashed and looked up. Your provider key never leaves the gateway.</p></li>
+        <li><h3>Reserve</h3><p>Prompt tokens plus <code>max_tokens</code> are reserved against the budget, in the same atomic step as the per-minute limits.</p></li>
+        <li><h3>Fit</h3><p>Not enough budget left for the full answer? <code>max_tokens</code> is lowered to what remains, so the provider can't overspend.</p></li>
+        <li><h3>Stream</h3><p>Provider bytes go straight to the client as they arrive. Usage is read off the final event without holding the stream.</p></li>
+        <li><h3>Settle</h3><p>The reservation is released and real usage is charged. This still happens when a client hangs up mid-answer.</p></li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="block" id="failures" aria-labelledby="fail-title">
+    <div class="wrap">
+      <h2 id="fail-title">When something breaks</h2>
+      <p class="intro">An outage in the limiter shouldn't take every AI feature down with it. Weir degrades in a defined way for each failure.</p>
+      <dl class="fails">
+        <dt>Redis is slow or down</dt>
+        <dd>A circuit breaker opens after a few failed calls, so requests stop waiting on it. Known teams keep being served under a per-process rate limit, marked <code>x-weir-degraded</code>. Set <code>FAIL_OPEN=false</code> to refuse instead.</dd>
+        <dt>Unknown key during an outage</dt>
+        <dd>Refused with 503. Staying open never means serving unauthenticated traffic.</dd>
+        <dt>Provider returns an error</dt>
+        <dd>The status and body pass through unchanged. The reservation is released and nothing is charged.</dd>
+        <dt>Provider is unreachable</dt>
+        <dd>OpenAI-style 502 or 504. After repeated failures a second breaker answers 503 immediately.</dd>
+        <dt>Client hangs up mid-stream</dt>
+        <dd>The upstream connection is closed, which stops generation. Tokens already produced are charged.</dd>
+      </dl>
+    </div>
+  </section>
+
+  <section class="block" id="numbers" aria-labelledby="num-title">
+    <div class="wrap">
+      <h2 id="num-title">Measured on a 2-core machine</h2>
+      <p class="intro">Every figure comes from the load scripts in the repository, run with the gateway, Redis, the mock provider and the load generator sharing two vCPUs.</p>
+      <div class="numbers">
+        <figure class="fig" style="margin:0">
+          <div class="fig-head">
+            <div>
+              <h3>Tokens spent against a 20,000-token budget</h3>
+              <p class="cap">600 streaming requests of up to 64 completion tokens each.</p>
+            </div>
+            <div class="seg light" role="radiogroup" aria-label="Concurrent requests">
+              <label><input type="radio" name="conc" value="100" checked><span>100 at once</span></label>
+              <label><input type="radio" name="conc" value="20"><span>20 at once</span></label>
+            </div>
+          </div>
+          <div class="bars budget" id="budget-bars"></div>
+        </figure>
+
+        <figure class="fig" style="margin:0">
+          <h3>SSE events forwarded per second, one worker</h3>
+          <p class="cap">1,000 concurrent streams at 10 tokens per second each.</p>
+          <div class="bars" id="tp-bars"></div>
+        </figure>
+
+        <figure class="fig" style="margin:0">
+          <h3>Latency added at 2,000 concurrent streams</h3>
+          <p class="cap">Gateway minus direct-to-provider, range over three runs of 6,000 streams. No errors in any run.</p>
+          <table class="lat">
+            <thead><tr><th scope="col"></th><th scope="col">p50</th><th scope="col">p95</th><th scope="col">p99</th></tr></thead>
+            <tbody>
+              <tr><td>First token</td><td class="big">+6–8 ms</td><td class="big">+34–67 ms</td><td class="big">+54–127 ms</td></tr>
+              <tr><td>Whole stream</td><td>+10–16 ms</td><td>+34–80 ms</td><td>+59–141 ms</td></tr>
+            </tbody>
+          </table>
+        </figure>
+
+        <p class="env">The throughput gap comes from httpx's default connection pool, which does work proportional to the number of open connections on every request. Weir ships its own HTTP/1.1 transport for httpx that pools in constant time and reads directly from asyncio streams.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="block" id="run" aria-labelledby="run-title">
+    <div class="wrap">
+      <h2 id="run-title">Run it</h2>
+      <p class="intro">This page is a simulation. The gateway itself is a Python service; the Compose stack starts it with Redis and a mock provider, so it works without an API key.</p>
+      <div class="run">
+        <div class="tabs" role="tablist" aria-label="Quickstart">
+          <button role="tab" id="tab-docker" aria-selected="true" aria-controls="panel" data-tab="docker">Docker Compose</button>
+          <button role="tab" id="tab-sdk" aria-selected="false" aria-controls="panel" data-tab="sdk" tabindex="-1">OpenAI SDK</button>
+          <button role="tab" id="tab-admin" aria-selected="false" aria-controls="panel" data-tab="admin" tabindex="-1">Add a team</button>
+        </div>
+        <div class="code" role="tabpanel" id="panel" aria-labelledby="tab-docker">
+          <button type="button" class="copy" id="copy">Copy</button>
+          <pre id="code" tabindex="0"></pre>
+        </div>
+        <p class="note" id="code-note"></p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>Weir is MIT licensed. Built with FastAPI, Redis and httpx.</span>
+    <a href="https://github.com/valentinakiyungi/weir">github.com/valentinakiyungi/weir</a>
+  </div>
+</footer>
+
+<script>
+(() => {
+  "use strict";
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const fmt = (n) => Math.round(n).toLocaleString("en-US");
+
+  /* ------------------------------------------------------------------ model
+     Mirrors the gateway's admit/settle scripts: RPM and TPM token buckets,
+     a period budget with reservations, and max_tokens fitted to what's left. */
+  const TENANTS = [
+    { id: "acme",   name: "Acme",        rpm: 90, tpm: 40000, budget: 60000, rate: 1.1 },
+    { id: "search", name: "Search team", rpm: 40, tpm: 16000, budget: 24000, rate: 0.7 },
+    { id: "trial",  name: "Trial",       rpm: 12, tpm: 5000,  budget: 6000,  rate: 0.35 },
+  ];
+  const MIN_COMPLETION = 16;
+  const MARGIN = 1.2;
+  let mode = "weir";
+  let redisDown = false;
+  let paused = false;
+  let now = 0;
+
+  const state = TENANTS.map((t) => ({
+    ...t, rpmTok: t.rpm, tpmTok: t.tpm, used: 0, reserved: 0,
+    served: 0, fitted: 0, refused: 0, unmetered: 0, ts: 0,
+  }));
+
+  function refill(s) {
+    const dt = Math.max(0, now - s.ts);
+    s.rpmTok = Math.min(s.rpm, s.rpmTok + dt * s.rpm / 60);
+    s.tpmTok = Math.min(s.tpm, s.tpmTok + dt * s.tpm / 60);
+    s.ts = now;
+  }
+
+  function admit(s, req) {
+    refill(s);
+    if (redisDown) {               // fail-open: local per-process RPM only
+      if (s.rpmTok < 1) return { ok: false, reason: "rpm" };
+      s.rpmTok -= 1;
+      return { ok: true, granted: req.max, fitted: false, degraded: true };
+    }
+    let granted = req.max;
+    const est = Math.ceil(req.prompt * MARGIN);
+    if (mode === "weir") {
+      const remaining = s.budget - s.used - s.reserved;
+      if (remaining < est + MIN_COMPLETION) return { ok: false, reason: "budget" };
+      if (est + granted > remaining) granted = remaining - est;
+    } else if (s.used >= s.budget) {
+      return { ok: false, reason: "budget" };
+    }
+    if (s.rpmTok < 1) return { ok: false, reason: "rpm" };
+    const cost = est + granted;
+    if (s.tpmTok < Math.min(cost, s.tpm)) return { ok: false, reason: "tpm" };
+    s.rpmTok -= 1;
+    s.tpmTok -= cost;
+    const reservation = mode === "weir" ? cost : 0;
+    s.reserved += reservation;
+    return { ok: true, granted, fitted: granted < req.max, reservation };
+  }
+
+  function settle(s, stream) {
+    const actual = stream.req.prompt + stream.completion;
+    if (stream.degraded) { s.unmetered += actual; return; }
+    s.reserved = Math.max(0, s.reserved - stream.reservation);
+    s.used += actual;
+    s.tpmTok = Math.min(s.tpm, s.tpmTok + Math.max(0, stream.reservation - actual));
+  }
+
+  /* ------------------------------------------------------------------ log */
+  const logEl = document.getElementById("log");
+  const announce = document.getElementById("announce");
+  const lastLogged = {};
+  function log(text, kind = "ok", key = null) {
+    if (key) {
+      if (lastLogged[key] && now - lastLogged[key] < 2.5) return;
+      lastLogged[key] = now;
+    }
+    const li = document.createElement("li");
+    li.dataset.kind = kind;
+    li.textContent = text;
+    logEl.prepend(li);
+    while (logEl.children.length > 4) logEl.lastChild.remove();
+  }
+
+  /* ------------------------------------------------------------------ gauges */
+  const gaugesEl = document.getElementById("gauges");
+  const gaugeRefs = state.map((s) => {
+    const g = document.createElement("div");
+    g.className = "gauge";
+    g.innerHTML = `
+      <h3>${s.name}</h3>
+      <div class="staff" role="meter" aria-label="${s.name} budget used" aria-valuemin="0" aria-valuemax="${s.budget}">
+        <div class="fill used"></div><div class="fill reserved"></div><div class="fill over"></div>
+        <div class="crestline"><span>budget</span></div>
+        <div class="paused-note" hidden>Metering paused</div>
+      </div>
+      <div class="readout"></div>`;
+    gaugesEl.appendChild(g);
+    return {
+      staff: g.querySelector(".staff"), used: g.querySelector(".used"),
+      reserved: g.querySelector(".reserved"), over: g.querySelector(".over"),
+      note: g.querySelector(".paused-note"), readout: g.querySelector(".readout"),
+    };
+  });
+  const SCALE = 1.5; // gauge shows 0..150% of budget; crest at 100%
+  function renderGauges() {
+    state.forEach((s, i) => {
+      const r = gaugeRefs[i];
+      const pct = (v) => Math.min(100, (v / (s.budget * SCALE)) * 100);
+      const usedIn = Math.min(s.used, s.budget);
+      const over = Math.max(0, s.used - s.budget);
+      r.used.style.height = pct(usedIn) + "%";
+      r.reserved.style.height = pct(Math.min(s.budget, s.used + s.reserved)) + "%";
+      r.over.style.bottom = pct(s.budget) + "%";
+      r.over.style.height = Math.max(0, pct(s.budget + over) - pct(s.budget)) + "%";
+      r.note.hidden = !redisDown;
+      r.staff.setAttribute("aria-valuenow", Math.round(s.used));
+      const overText = over > 0 ? `<br><span class="over-text">${fmt(over)} over budget</span>` : "";
+      r.readout.innerHTML =
+        `<b>${fmt(s.used)}</b> / ${fmt(s.budget)}<br>` +
+        `in flight ${fmt(s.reserved)}${overText}<br>` +
+        `served ${s.served}, fitted ${s.fitted}<br>refused ${s.refused}`;
+    });
+  }
+
+  /* ------------------------------------------------------------------ river canvas */
+  const canvas = document.getElementById("river");
+  const ctx = canvas.getContext("2d");
+  let W = 0, H = 0, dpr = 1;
+  let colors = {};
+  function readColors() {
+    const cs = getComputedStyle(document.documentElement);
+    const v = (n) => cs.getPropertyValue(n).trim();
+    colors = {
+      deep: v("--deep"), deep2: v("--deep-2"), flow: v("--flow-bright"), clamp: v("--clamp-bright"),
+      stop: v("--stop-bright"), crest: v("--crest"), text: v("--on-deep"), muted: v("--on-deep-muted"),
+    };
+  }
+  function resize() {
+    const rect = canvas.getBoundingClientRect();
+    dpr = Math.min(2, window.devicePixelRatio || 1);
+    W = rect.width; H = rect.height;
+    canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    draw();
+  }
+  new ResizeObserver(resize).observe(canvas);
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { readColors(); draw(); });
+  new MutationObserver(() => { readColors(); draw(); })
+    .observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+
+  const geo = () => {
+    const top = 34, bottom = H - 18;
+    const lane = (bottom - top) / state.length;
+    const wallX = Math.round(W * (W < 520 ? 0.5 : 0.56));
+    return { top, lane, wallX, rowY: (i) => top + lane * (i + 0.5) };
+  };
+
+  const pending = [];   // requests travelling toward the weir
+  const streams = [];   // admitted requests streaming downstream
+  const drops = [];     // token droplets, purely visual
+  const bounces = [];   // refused requests washing back
+  const TRAVEL = reduce ? 0 : 0.9;
+
+  function spawn(i) {
+    const prompt = 150 + Math.random() * 650;
+    const max = [256, 512, 1024][Math.floor(Math.random() * 3)];
+    pending.push({ i, born: now, req: { prompt: Math.round(prompt), max }, jitter: (Math.random() - 0.5) });
+  }
+
+  function arrive(p) {
+    const s = state[p.i];
+    const d = admit(s, p.req);
+    if (!d.ok) {
+      s.refused++;
+      if (d.reason === "budget") log(`${s.name}: refused, today's budget is spent. Retry after the daily reset.`, "stop", s.id + "b");
+      else if (d.reason === "rpm") log(`${s.name}: refused, ${s.rpm} requests per minute reached.`, "stop", s.id + "r");
+      else log(`${s.name}: refused, ${fmt(s.tpm)} tokens per minute reached.`, "stop", s.id + "t");
+      bounces.push({ i: p.i, x: 0, born: now, jitter: p.jitter });
+      return;
+    }
+    s.served++;
+    if (d.fitted) {
+      s.fitted++;
+      log(`${s.name}: max_tokens ${fmt(p.req.max)} lowered to ${fmt(d.granted)} to fit the budget.`, "clamp", s.id + "c");
+    }
+    const completion = Math.max(8, Math.round(d.granted * (0.35 + Math.random() * 0.6)));
+    streams.push({
+      i: p.i, start: now, dur: 1.2 + completion / 300, req: p.req, completion,
+      reservation: d.reservation || 0, degraded: !!d.degraded, fitted: d.fitted, lastDrop: now, jitter: p.jitter,
+    });
+  }
+
+  function step(dt) {
+    now += dt;
+    state.forEach((s, i) => { if (Math.random() < s.rate * dt) spawn(i); });
+    for (let k = pending.length - 1; k >= 0; k--) {
+      if (now - pending[k].born >= TRAVEL) { const p = pending.splice(k, 1)[0]; arrive(p); }
+    }
+    const { wallX } = W ? geo() : { wallX: 0 };
+    for (let k = streams.length - 1; k >= 0; k--) {
+      const st = streams[k];
+      if (!reduce && now - st.lastDrop > 0.11 && drops.length < 700) {
+        drops.push({ i: st.i, x: wallX + 10, born: now, color: st.fitted ? "clamp" : "flow", jitter: st.jitter + (Math.random() - 0.5) * 0.5 });
+        st.lastDrop = now;
+      }
+      if (now - st.start >= st.dur) { streams.splice(k, 1); settle(state[st.i], st); }
+    }
+    for (let k = drops.length - 1; k >= 0; k--) if (now - drops[k].born > 1.6) drops.splice(k, 1);
+    for (let k = bounces.length - 1; k >= 0; k--) if (now - bounces[k].born > 1.1) bounces.splice(k, 1);
+  }
+
+  function draw() {
+    if (!W || !colors.deep) return;
+    const { top, lane, wallX, rowY } = geo();
+    ctx.clearRect(0, 0, W, H);
+    // lanes
+    state.forEach((s, i) => {
+      const y = rowY(i);
+      ctx.fillStyle = colors.deep2;
+      ctx.globalAlpha = 0.55;
+      ctx.fillRect(0, y - lane * 0.3, W, lane * 0.6);
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = colors.text;
+      ctx.font = "600 13px Archivo, sans-serif";
+      ctx.fillText(s.name, 12, y - lane * 0.3 - 6);
+    });
+    // labels
+    ctx.fillStyle = colors.muted;
+    ctx.font = "500 12px Archivo, sans-serif";
+    ctx.fillText("Your apps", 12, 18);
+    const prov = "Provider";
+    ctx.fillText(prov, W - ctx.measureText(prov).width - 12, 18);
+    // the weir wall
+    const wallTop = top - 6, wallBottom = H - 10;
+    ctx.fillStyle = colors.crest;
+    ctx.beginPath();
+    ctx.moveTo(wallX - 9, wallBottom);
+    ctx.lineTo(wallX - 6, wallTop + 6);
+    ctx.quadraticCurveTo(wallX, wallTop - 2, wallX + 6, wallTop + 6);
+    ctx.lineTo(wallX + 12, wallBottom);
+    ctx.closePath();
+    ctx.fill();
+    if (redisDown) {
+      ctx.fillStyle = colors.stop;
+      ctx.fillRect(wallX - 7, wallTop + 4, 15, 4);
+    }
+    // incoming requests
+    pending.forEach((p) => {
+      const y = rowY(p.i) + p.jitter * lane * 0.35;
+      const t = TRAVEL ? Math.min(1, (now - p.born) / TRAVEL) : 1;
+      const x = 14 + (wallX - 30) * (1 - Math.pow(1 - t, 1.6));
+      ctx.fillStyle = colors.text;
+      ctx.globalAlpha = 0.9;
+      roundRect(x - 9, y - 3.5, 18, 7, 3.5);
+      ctx.globalAlpha = 1;
+    });
+    // refused: wash back
+    bounces.forEach((b) => {
+      const t = (now - b.born) / 1.1;
+      const y = rowY(b.i) + b.jitter * lane * 0.35;
+      const x = wallX - 18 - t * (wallX * 0.35);
+      ctx.globalAlpha = Math.max(0, 1 - t);
+      ctx.fillStyle = colors.stop;
+      roundRect(x - 9, y - 3.5, 18, 7, 3.5);
+      ctx.globalAlpha = 1;
+    });
+    // streams: a steady bar per open stream at the weir, droplets downstream
+    streams.forEach((st) => {
+      const y = rowY(st.i) + st.jitter * lane * 0.35;
+      const left = 1 - Math.min(1, (now - st.start) / st.dur);
+      ctx.fillStyle = st.fitted ? colors.clamp : colors.flow;
+      ctx.globalAlpha = 0.35 + 0.65 * left;
+      ctx.beginPath();
+      ctx.arc(wallX + 18, y, 3.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    });
+    drops.forEach((d) => {
+      const t = (now - d.born) / 1.6;
+      const y = rowY(d.i) + d.jitter * lane * 0.35;
+      const x = wallX + 18 + (W - wallX - 30) * t;
+      ctx.globalAlpha = Math.max(0, 1 - t * t);
+      ctx.fillStyle = d.color === "clamp" ? colors.clamp : colors.flow;
+      ctx.fillRect(x, y - 1.5, 6, 3);
+      ctx.globalAlpha = 1;
+    });
+    if (paused) {
+      ctx.fillStyle = colors.muted;
+      ctx.font = "600 13px Archivo, sans-serif";
+      ctx.fillText("Paused", 12, H - 10);
+    }
+  }
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.fill();
+  }
+
+  let last = performance.now();
+  let gaugeTick = 0;
+  function frame(t) {
+    const dt = Math.min(0.1, (t - last) / 1000);
+    last = t;
+    if (!paused) {
+      step(dt);
+      gaugeTick += dt;
+      if (gaugeTick > 0.2) { renderGauges(); gaugeTick = 0; }
+    }
+    draw();
+    requestAnimationFrame(frame);
+  }
+
+  /* ------------------------------------------------------------------ controls */
+  document.getElementById("burst").addEventListener("click", () => {
+    state.forEach((s, i) => {
+      for (let k = 0; k < 24; k++) setTimeout(() => spawn(i), k * 18);
+    });
+    log("Burst: 72 requests arrive within half a second.", "info");
+    announce.textContent = "Sent a burst of 72 requests.";
+  });
+  const redisBtn = document.getElementById("redis");
+  const pill = document.getElementById("redis-pill");
+  redisBtn.addEventListener("click", () => {
+    redisDown = !redisDown;
+    redisBtn.setAttribute("aria-pressed", String(redisDown));
+    redisBtn.textContent = redisDown ? "Bring Redis back" : "Take Redis offline";
+    pill.dataset.state = redisDown ? "down" : "up";
+    pill.textContent = redisDown ? "Redis offline: serving on local limits" : "Redis online";
+    const msg = redisDown
+      ? "Redis offline. Requests keep flowing under per-process rate limits; budgets are not metered."
+      : "Redis back. Budgets and shared limits are enforced again.";
+    log(msg, "info");
+    announce.textContent = msg;
+    renderGauges();
+  });
+  document.querySelectorAll('input[name="mode"]').forEach((el) => el.addEventListener("change", () => {
+    mode = el.value;
+    const msg = mode === "weir"
+      ? "Reserve first: worst-case cost is reserved before each call."
+      : "Check, then charge: requests pass while spend is under budget and are charged afterwards. Watch bursts overshoot.";
+    log(msg, "info");
+    announce.textContent = msg;
+  }));
+  document.getElementById("newday").addEventListener("click", () => {
+    state.forEach((s) => { s.used = 0; s.served = 0; s.fitted = 0; s.refused = 0; s.unmetered = 0; });
+    log("New day: budgets reset.", "info");
+    announce.textContent = "Budgets reset.";
+    renderGauges();
+  });
+  const pauseBtn = document.getElementById("pause");
+  pauseBtn.addEventListener("click", () => {
+    paused = !paused;
+    pauseBtn.setAttribute("aria-pressed", String(paused));
+    pauseBtn.textContent = paused ? "Resume" : "Pause";
+  });
+
+  // Start part-way through a day so the gauges have something to show.
+  readColors();
+  state.forEach((s, i) => { s.used = Math.round(s.budget * [0.38, 0.55, 0.72][i]); });
+  log("Simulation running. Try a burst, or switch the budget check.", "info");
+  renderGauges();
+  requestAnimationFrame((t) => { last = t; frame(t); });
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(draw);
+
+  /* ------------------------------------------------------------------ charts (measured) */
+  const BUDGET_DATA = {
+    100: [["No limiter", 49200, "bad"], ["Check, then charge", 28126, "bad"], ["Weir", 20000, "ok"]],
+    20:  [["No limiter", 49200, "bad"], ["Check, then charge", 21566, "bad"], ["Weir", 20000, "ok"]],
+  };
+  const budgetBars = document.getElementById("budget-bars");
+  function renderBudget(c) {
+    const max = 50000;
+    const crestPct = (20000 / max) * 100;
+    budgetBars.innerHTML = BUDGET_DATA[c].map(([name, v, cls], idx) => {
+      const over = ((v - 20000) / 20000) * 100;
+      const label = `${fmt(v)} (${over > 0 ? "+" + over.toFixed(1) : "0.0"}%)`;
+      const tag = idx === 0 ? "<span>budget</span>" : "";
+      return `<div class="bar-row"><span class="name">${name}</span>
+        <div class="track"><div class="bar ${cls}" style="width:${(v / max) * 100}%">${label}</div>
+        <span class="crest-mark" style="left:${crestPct}%" aria-hidden="true">${tag}</span></div></div>`;
+    }).join("");
+  }
+  document.querySelectorAll('input[name="conc"]').forEach((el) =>
+    el.addEventListener("change", () => renderBudget(el.value)));
+  renderBudget(100);
+
+  const TP = [["Default httpx client", 250, "bad"], ["httpx, 16 pools", 3100, "mid"], ["Weir transport", 4700, "ok"]];
+  document.getElementById("tp-bars").innerHTML = TP.map(([name, v, cls]) =>
+    `<div class="bar-row"><span class="name">${name}</span>
+      <div class="track"><div class="bar ${cls}" style="width:${(v / 4700) * 100}%">${fmt(v)}</div></div></div>`).join("");
+
+  /* ------------------------------------------------------------------ quickstart */
+  const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+  const SNIPPETS = {
+    docker: {
+      text: `git clone https://github.com/valentinakiyungi/weir.git
+cd weir
+docker compose up --build
+
+# in another terminal
+curl -N localhost:8000/v1/chat/completions \\
+  -H "Authorization: Bearer weir-acme-dev-key" \\
+  -d '{"model":"gpt-4o-mini","stream":true,"max_tokens":20,
+       "messages":[{"role":"user","content":"hi"}]}'`,
+      note: "To front a real provider, start it with UPSTREAM_BASE_URL=https://api.openai.com/v1 and UPSTREAM_API_KEY set to your key.",
+    },
+    sdk: {
+      text: `from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8000/v1",
+                api_key="weir-acme-dev-key")
+
+stream = client.chat.completions.create(
+    model="gpt-4o-mini", stream=True,
+    messages=[{"role": "user", "content": "Write a haiku about rate limits"}],
+)
+for chunk in stream:
+    if chunk.choices:
+        print(chunk.choices[0].delta.content or "", end="")`,
+      note: "Only the base URL and the key change. Limit errors arrive as standard 429s, so the SDK's retry logic keeps working.",
+    },
+    admin: {
+      text: `curl -X POST localhost:8000/admin/tenants \\
+  -H "Authorization: Bearer $ADMIN_API_KEY" \\
+  -d '{"id": "search-team",
+       "rpm": 120,
+       "tpm": 200000,
+       "token_budget": 2000000,
+       "allowed_models": ["gpt-4o-mini"]}'
+
+# the response includes the team's key, shown once
+curl localhost:8000/admin/tenants/search-team/usage \\
+  -H "Authorization: Bearer $ADMIN_API_KEY"`,
+      note: "Budgets reset daily or monthly in UTC. Limits can be changed at any time with PATCH /admin/tenants/{id}.",
+    },
+  };
+  function highlight(code) {
+    const re = /(#[^\n]*)|("[^"\n]*")|\b(from|import|for|in|if|print)\b/g;
+    let out = "", i = 0, m;
+    while ((m = re.exec(code))) {
+      out += esc(code.slice(i, m.index));
+      const cls = m[1] ? "c" : m[2] ? "s" : "k";
+      out += `<span class="${cls}">${esc(m[0])}</span>`;
+      i = m.index + m[0].length;
+    }
+    return out + esc(code.slice(i));
+  }
+  const codeEl = document.getElementById("code");
+  const noteEl = document.getElementById("code-note");
+  const panel = document.getElementById("panel");
+  const tabs = [...document.querySelectorAll('[role="tab"]')];
+  let current = "docker";
+  function showTab(name, focus) {
+    current = name;
+    tabs.forEach((t) => {
+      const on = t.dataset.tab === name;
+      t.setAttribute("aria-selected", String(on));
+      t.tabIndex = on ? 0 : -1;
+      if (on) { panel.setAttribute("aria-labelledby", t.id); if (focus) t.focus(); }
+    });
+    codeEl.innerHTML = highlight(SNIPPETS[name].text);
+    noteEl.textContent = SNIPPETS[name].note;
+  }
+  tabs.forEach((t, idx) => {
+    t.addEventListener("click", () => showTab(t.dataset.tab));
+    t.addEventListener("keydown", (e) => {
+      if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+      const n = tabs[(idx + (e.key === "ArrowRight" ? 1 : tabs.length - 1)) % tabs.length];
+      showTab(n.dataset.tab, true);
+    });
+  });
+  showTab("docker");
+  const copyBtn = document.getElementById("copy");
+  copyBtn.addEventListener("click", () => {
+    const text = SNIPPETS[current].text;
+    const done = () => { copyBtn.textContent = "Copied"; setTimeout(() => (copyBtn.textContent = "Copy"), 1600); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, () => selectCode());
+    } else selectCode();
+    function selectCode() {
+      const r = document.createRange(); r.selectNodeContents(codeEl);
+      const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+      copyBtn.textContent = "Press Ctrl+C";
+    }
+  });
+})();
+</script>
+</body>
+</html>

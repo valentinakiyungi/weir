@@ -9,7 +9,7 @@
       "max_tokens_cap": 4096,
       "allowed_models": [],
       "api_keys": [
-        "gw-acme-local-dev-key"
+        "weir-acme-dev-key"
       ]
     },
     {
@@ -23,7 +23,7 @@
         "gpt-4o-mini"
       ],
       "api_keys": [
-        "gw-startup-local-dev-key"
+        "weir-startup-dev-key"
       ]
     },
     {
@@ -34,7 +34,7 @@
       "token_budget": 100000000000,
       "allowed_models": [],
       "api_keys": [
-        "gw-loadtest-local-dev-key"
+        "weir-loadtest-dev-key"
       ]
     }
   ]

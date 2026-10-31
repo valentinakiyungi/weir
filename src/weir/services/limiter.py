@@ -29,13 +29,13 @@ import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
-from gateway.core.config import Settings
-from gateway.core.logging import log_event
-from gateway.core.redis import RedisGuard, RedisUnavailable
-from gateway.services.metrics import Metrics
-from gateway.services.tenants import Tenant
+from weir.core.config import Settings
+from weir.core.logging import log_event
+from weir.core.redis import RedisGuard, RedisUnavailable
+from weir.services.metrics import Metrics
+from weir.services.tenants import Tenant
 
-log = logging.getLogger("gateway.limiter")
+log = logging.getLogger("weir.limiter")
 
 ADMIT_LUA = """
 local t = redis.call('TIME')

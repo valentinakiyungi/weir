@@ -10,13 +10,13 @@ import time
 
 import httpx
 
-from gateway.core.circuit import CircuitBreaker
-from gateway.core.config import Settings
-from gateway.core.logging import log_event
-from gateway.services.metrics import Metrics
-from gateway.services.transport import FastTransport
+from weir.core.circuit import CircuitBreaker
+from weir.core.config import Settings
+from weir.core.logging import log_event
+from weir.services.metrics import Metrics
+from weir.services.transport import FastTransport
 
-log = logging.getLogger("gateway.upstream")
+log = logging.getLogger("weir.upstream")
 
 
 class UpstreamError(Exception):

@@ -32,12 +32,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: docker build -t llm-gateway-proxy .
+      - run: docker build -t weir .
       - name: smoke test compose stack
         run: |
           docker compose up -d --build
           for i in $(seq 1 30); do curl -sf localhost:8000/health && break; sleep 1; done
           curl -sf localhost:8000/v1/chat/completions \
-            -H "Authorization: Bearer gw-acme-local-dev-key" \
+            -H "Authorization: Bearer weir-acme-dev-key" \
             -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}],"max_tokens":5}'
           docker compose down

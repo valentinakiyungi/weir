@@ -1,13 +1,15 @@
 <div align="center">
 
-# Enterprise LLM Gateway & Token Governance Proxy
+# Weir
 
-**An asynchronous, OpenAI-compatible LLM reverse proxy with multi-tenant token governance, atomic Redis rate limiting, zero-buffer SSE streaming and fail-open circuit breaking.**
+**Weir lets tokens through, never past the budget. An asynchronous, OpenAI-compatible LLM gateway with multi-tenant token governance, atomic Redis rate limiting, zero-buffer SSE streaming and fail-open circuit breaking.**
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110%2B-005571?logo=fastapi)](https://fastapi.tiangolo.com/)
 [![Redis](https://img.shields.io/badge/Redis-7.0%2B-dc382d?logo=redis&logoColor=white)](https://redis.io/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+**[Website & live demo](https://valentinakiyungi.github.io/weir/)**
 
 </div>
 
@@ -15,7 +17,9 @@
 
 ## Overview
 
-Applications that call LLM APIs directly share one provider key, have no per-team limits, and only find out about runaway spend on the invoice. `llm-gateway-proxy` sits between your applications and any OpenAI-compatible provider and gives each tenant:
+*A weir is a low dam across a river: water keeps flowing over it, but the level upstream is held where you set it. That is the job here, with tokens instead of water.*
+
+Applications that call LLM APIs directly share one provider key, have no per-team limits, and only find out about runaway spend on the invoice. Weir sits between your applications and any OpenAI-compatible provider and gives each tenant:
 
 - **Its own gateway API key** – the provider key never leaves the gateway.
 - **Requests-per-minute and tokens-per-minute limits**, enforced atomically across any number of gateway instances.
@@ -31,9 +35,9 @@ Clients keep using the official OpenAI SDKs – only the base URL and key change
 
 ```mermaid
 graph TD
-    Client[Client app / OpenAI SDK] -->|POST /v1/chat/completions<br/>Bearer gw-...| Auth
+    Client[Client app / OpenAI SDK] -->|POST /v1/chat/completions<br/>Bearer weir-...| Auth
 
-    subgraph Gateway [FastAPI gateway - N workers / instances]
+    subgraph Gateway [Weir - N workers / instances]
         Auth[1. Tenant auth<br/>SHA-256 key lookup, TTL cache] --> Admit
         Admit[2. Admission: one Lua script<br/>RPM bucket + TPM bucket + budget reservation<br/>clamps max_tokens to remaining budget] --> Proxy
         Proxy[3. Upstream call<br/>pooled keep-alive connections<br/>provider key injected] --> Tap
@@ -57,13 +61,13 @@ graph TD
 4. **Stream** – upstream bytes are forwarded as they arrive. The gateway asks the provider for usage (`stream_options.include_usage`) and a tap reads it from the final event without holding the stream.
 5. **Settle (atomic)** – releases the reservation, charges the provider-reported usage, refunds the unused part of the TPM reservation and updates usage counters. This also runs, shielded from cancellation, when the client disconnects mid-stream: the upstream connection is closed (stopping generation) and the partial usage is billed.
 
-All of a tenant's keys share a Redis Cluster hash tag (`gw:rl:{tenant}:…`) so the scripts are cluster-safe, and time is taken from Redis `TIME` so instances with skewed clocks still agree.
+All of a tenant's keys share a Redis Cluster hash tag (`weir:rl:{tenant}:…`) so the scripts are cluster-safe, and time is taken from Redis `TIME` so instances with skewed clocks still agree.
 
 ### Failure behaviour
 
 | Failure | Behaviour |
 |---|---|
-| Redis slow/down | Breaker opens after `REDIS_BREAKER_THRESHOLD` failures (tight 250 ms timeouts), then calls short-circuit instantly. With `FAIL_OPEN=true` known tenants keep being served (seed file / cached tenants) under a **local per-process RPM guard**, responses carry `x-gateway-degraded: 1`. `FAIL_OPEN=false` returns 503 instead. Half-open probes restore normal operation automatically. |
+| Redis slow/down | Breaker opens after `REDIS_BREAKER_THRESHOLD` failures (tight 250 ms timeouts), then calls short-circuit instantly. With `FAIL_OPEN=true` known tenants keep being served (seed file / cached tenants) under a **local per-process RPM guard**, responses carry `x-weir-degraded: 1`. `FAIL_OPEN=false` returns 503 instead. Half-open probes restore normal operation automatically. |
 | Unknown key while Redis is down | 503 (can't authenticate) – fail-open never means unauthenticated. |
 | Upstream 4xx/5xx | Status and body passed through unchanged; reservation released, nothing billed. |
 | Upstream unreachable / timeout | OpenAI-style 502 / 504; after `UPSTREAM_BREAKER_THRESHOLD` consecutive failures the upstream breaker returns 503 immediately. |
@@ -77,14 +81,14 @@ All of a tenant's keys share a Redis Cluster hash tag (`gw:rl:{tenant}:…`) so 
 ### 1. Run the full stack (gateway + Redis + mock provider)
 
 ```bash
-git clone https://github.com/valentinakiyungi/llm-gateway-proxy.git
-cd llm-gateway-proxy
+git clone https://github.com/valentinakiyungi/weir.git
+cd weir
 docker compose up --build
 ```
 
 ```bash
 curl -N localhost:8000/v1/chat/completions \
-  -H "Authorization: Bearer gw-acme-local-dev-key" \
+  -H "Authorization: Bearer weir-acme-dev-key" \
   -d '{"model":"gpt-4o-mini","stream":true,"messages":[{"role":"user","content":"hi"}],"max_tokens":20}'
 ```
 
@@ -102,7 +106,7 @@ uvicorn mock_upstream.server:app --port 9000
 
 # terminal 2: gateway
 export UPSTREAM_BASE_URL=http://localhost:9000/v1 TENANTS_FILE=config/tenants.example.json ADMIN_API_KEY=change-me
-llm-gateway            # or: uvicorn gateway.main:app --port 8000 --workers 2
+weir                   # or: uvicorn weir.main:app --port 8000 --workers 2
 ```
 
 ### 3. Use it from the OpenAI SDK
@@ -110,7 +114,7 @@ llm-gateway            # or: uvicorn gateway.main:app --port 8000 --workers 2
 ```python
 from openai import OpenAI
 
-client = OpenAI(base_url="http://localhost:8000/v1", api_key="gw-acme-local-dev-key")
+client = OpenAI(base_url="http://localhost:8000/v1", api_key="weir-acme-dev-key")
 for chunk in client.chat.completions.create(
     model="gpt-4o-mini", stream=True,
     messages=[{"role": "user", "content": "Write a haiku about rate limits"}],
@@ -135,11 +139,11 @@ Auth: `Authorization: Bearer <gateway key>` or `x-api-key: <gateway key>`.
 Every governed response carries:
 
 ```
-x-request-id, x-gateway-tenant
+x-request-id, x-weir-tenant
 x-ratelimit-limit-requests / x-ratelimit-remaining-requests
 x-ratelimit-limit-tokens   / x-ratelimit-remaining-tokens
-x-gateway-budget-remaining, x-gateway-max-tokens (the granted completion cap)
-x-gateway-degraded: 1      (only when served in fail-open mode)
+x-weir-budget-remaining, x-weir-max-tokens (the granted completion cap)
+x-weir-degraded: 1      (only when served in fail-open mode)
 ```
 
 Rejections use the OpenAI error schema so SDK retry logic works: `429 rate_limit_exceeded` (RPM/TPM, with `Retry-After`) and `429 insufficient_quota` (budget exhausted, `Retry-After` = seconds until the period resets).
@@ -232,9 +236,9 @@ Reproduce:
 ```bash
 python scripts/fast_upstream.py --port 9200 --token-delay-ms 500 --tokens 10 &
 UPSTREAM_BASE_URL=http://127.0.0.1:9200/v1 TENANTS_FILE=config/tenants.example.json \
-  uvicorn gateway.main:app --port 8000 --workers 2 --no-access-log &
+  uvicorn weir.main:app --port 8000 --workers 2 --no-access-log &
 python scripts/loadtest.py --compare http://127.0.0.1:9200/v1 --url http://127.0.0.1:8000/v1 \
-  --key gw-loadtest-local-dev-key --concurrency 2000 --rounds 3 --max-tokens 10 --ramp 5
+  --key weir-loadtest-dev-key --concurrency 2000 --rounds 3 --max-tokens 10 --ramp 5
 
 python scripts/budget_burst.py --url http://127.0.0.1:8000 --admin-key change-me \
   --budget 20000 --requests 600 --concurrency 100   # gateway pointed at mock_upstream
@@ -245,8 +249,8 @@ python scripts/budget_burst.py --url http://127.0.0.1:8000 --admin-key change-me
 ## Project layout
 
 ```text
-llm-gateway-proxy/
-├── src/gateway/
+weir/
+├── src/weir/
 │   ├── main.py              # app factory, lifespan, /health /ready /metrics
 │   ├── api/
 │   │   ├── v1.py            # OpenAI-compatible routes, SSE passthrough
@@ -266,6 +270,7 @@ llm-gateway-proxy/
 │       ├── tokens.py        # prompt token estimation
 │       └── metrics.py       # Prometheus metrics
 ├── mock_upstream/server.py  # OpenAI-compatible mock provider
+├── site/index.html          # project website (deployed to GitHub Pages)
 ├── scripts/                 # loadtest, fast_upstream, budget_burst
 ├── config/tenants.example.json
 ├── tests/                   # 44 tests against real Redis + real sockets
@@ -282,6 +287,10 @@ ruff check .
 ```
 
 The suite runs against a real Redis (the Lua scripts are the core of the system) and real uvicorn servers for streaming. It covers auth, model allow-lists, RPM/TPM limits including atomicity under 40 concurrent requests, budget clamping and exhaustion, zero overrun under a 100-request burst, upstream errors and circuit breaking, incremental chunk delivery, client-disconnect settlement, Redis outage in both fail-open and fail-closed modes and recovery, the admin lifecycle, and the HTTP transport (keep-alive reuse, stale-connection retry, timeouts, chunked/close-delimited bodies).
+
+## Website
+
+`site/index.html` is a single static page (no build step) with an in-browser simulation of the gateway. `.github/workflows/pages.yml` publishes it to GitHub Pages on every push to `main` that touches `site/`. One-time setup: **Settings → Pages → Build and deployment → Source: GitHub Actions**.
 
 ## Limitations
 

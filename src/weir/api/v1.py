@@ -14,16 +14,16 @@ import httpx
 from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import StreamingResponse
 
-from gateway.api.deps import Services, current_tenant, read_json, services
-from gateway.api.errors import GatewayError
-from gateway.core.logging import log_event
-from gateway.services.limiter import Decision
-from gateway.services.proxy import SSEUsageTap, UpstreamError, usage_from_json
-from gateway.services.tenants import Tenant
-from gateway.services.tokens import count_text, estimate_chat_prompt, estimate_embedding_input
+from weir.api.deps import Services, current_tenant, read_json, services
+from weir.api.errors import GatewayError
+from weir.core.logging import log_event
+from weir.services.limiter import Decision
+from weir.services.proxy import SSEUsageTap, UpstreamError, usage_from_json
+from weir.services.tenants import Tenant
+from weir.services.tokens import count_text, estimate_chat_prompt, estimate_embedding_input
 
 router = APIRouter(prefix="/v1")
-log = logging.getLogger("gateway.access")
+log = logging.getLogger("weir.access")
 
 REJECT_MESSAGES = {
     "rpm_exceeded": ("Request rate limit exceeded for this tenant.", "rate_limit_exceeded"),
@@ -38,7 +38,7 @@ def _request_id(request: Request) -> str:
 
 
 def _governance_headers(tenant: Tenant, d: Decision, rid: str) -> dict[str, str]:
-    h = {"x-request-id": rid, "x-gateway-tenant": tenant.id}
+    h = {"x-request-id": rid, "x-weir-tenant": tenant.id}
     if tenant.rpm:
         h["x-ratelimit-limit-requests"] = str(tenant.rpm)
         if d.rpm_remaining is not None:
@@ -48,11 +48,11 @@ def _governance_headers(tenant: Tenant, d: Decision, rid: str) -> dict[str, str]
         if d.tpm_remaining is not None:
             h["x-ratelimit-remaining-tokens"] = str(max(0, d.tpm_remaining))
     if d.budget_remaining is not None:
-        h["x-gateway-budget-remaining"] = str(max(0, d.budget_remaining))
+        h["x-weir-budget-remaining"] = str(max(0, d.budget_remaining))
     if d.granted_completion:
-        h["x-gateway-max-tokens"] = str(d.granted_completion)
+        h["x-weir-max-tokens"] = str(d.granted_completion)
     if d.degraded:
-        h["x-gateway-degraded"] = "1"
+        h["x-weir-degraded"] = "1"
     return h
 
 

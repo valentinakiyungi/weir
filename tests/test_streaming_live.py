@@ -11,8 +11,8 @@ import pytest
 import uvicorn
 
 import mock_upstream.server as mock_server
-from gateway.main import create_app
 from tests.conftest import auth, chat_body
+from weir.main import create_app
 
 pytestmark = pytest.mark.anyio
 
@@ -48,7 +48,7 @@ async def live(make_settings, monkeypatch, request):
 async def test_chunks_are_delivered_incrementally(live):
     t0 = time.perf_counter()
     arrivals = []
-    async with live.stream("POST", "/v1/chat/completions", headers=auth("gw-acme"),
+    async with live.stream("POST", "/v1/chat/completions", headers=auth("weir-acme"),
                            json=chat_body(stream=True, max_tokens=10)) as r:
         assert r.status_code == 200
         async for line in r.aiter_lines():
@@ -61,7 +61,7 @@ async def test_chunks_are_delivered_incrementally(live):
 
 
 async def test_client_disconnect_releases_reservation_and_bills_partial(live):
-    async with live.stream("POST", "/v1/chat/completions", headers=auth("gw-acme"),
+    async with live.stream("POST", "/v1/chat/completions", headers=auth("weir-acme"),
                            json=chat_body(stream=True, max_tokens=40)) as r:
         n = 0
         async for line in r.aiter_lines():

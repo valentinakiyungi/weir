@@ -16,6 +16,14 @@ An OpenAI-compatible LLM gateway that gives every team its own key, rate limits 
 
 </div>
 
+<p align="center">
+  <a href="https://valentinakiyungi.github.io/weir/">
+    <img src="docs/assets/weir-simulation.gif" alt="Weir simulation: three teams share one provider key. With Weir's reserve-first accounting a burst of 72 requests stays under every budget; with a check-then-charge limiter the same burst overshoots; when Redis goes offline requests keep flowing under local limits." width="800">
+  </a>
+  <br>
+  <sub>A recording of the <a href="https://valentinakiyungi.github.io/weir/">live simulation</a>: the same burst under Weir and under a check-then-charge limiter, then a Redis outage. Open the site to run it yourself.</sub>
+</p>
+
 ---
 
 ## Contents
@@ -489,9 +497,10 @@ weir/
 │       ├── tokens.py        Prompt token estimation
 │       └── metrics.py       Prometheus metrics
 ├── mock_upstream/           OpenAI-compatible mock provider
-├── scripts/                 Load test, fast upstream, budget burst benchmark
+├── scripts/                 Load test, budget burst benchmark, demo recorder
 ├── config/                  Example tenant seed file
 ├── site/                    Project website (GitHub Pages)
+├── docs/assets/             README media
 ├── tests/                   Test suite
 ├── Dockerfile               Multi-stage, non-root image with health check
 └── docker-compose.yml       Weir, Redis and the mock provider
@@ -514,7 +523,7 @@ docker run -p 8000:8000 \
 
 **Redis.** Use Redis 7+ with persistence enabled and `maxmemory-policy noeviction`, so budget counters are never evicted. Redis Cluster is supported through hash-tagged keys.
 
-**Website.** [`site/index.html`](site/index.html) is a static page with an in-browser simulation of the gateway. The [`pages`](.github/workflows/pages.yml) workflow publishes it on every push to `main` that changes `site/`. One-time setup: **Settings → Pages → Source: GitHub Actions**.
+**Website.** [`site/index.html`](site/index.html) is a static page with an in-browser simulation of the gateway. The [`pages`](.github/workflows/pages.yml) workflow publishes it on every push to `main`. One-time setup: **Settings → Pages → Source: GitHub Actions**. The animation at the top of this README is recorded from the site with `python scripts/record_demo.py` (needs Playwright and ffmpeg).
 
 ---
 
